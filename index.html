@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sonic Garden</title>
 
   <!-- p5.js -->
@@ -9,11 +10,78 @@
 
   <!-- p5 sound -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/addons/p5.sound.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    
+    #startScreen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      font-family: 'Arial', sans-serif;
+    }
+    
+    #startScreen h1 {
+      color: white;
+      font-size: 48px;
+      margin-bottom: 20px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    #startScreen p {
+      color: rgba(255,255,255,0.9);
+      font-size: 18px;
+      margin-bottom: 30px;
+    }
+    
+    #startButton {
+      padding: 20px 50px;
+      font-size: 24px;
+      background: white;
+      color: #667eea;
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    #startButton:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    }
+    
+    #startButton:active {
+      transform: translateY(0);
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+  </style>
 </head>
 
 <body>
-<script>
+  <!-- Start Screen -->
+  <div id="startScreen">
+    <h1>🌱 Sonic Garden 🌱</h1>
+    <p>Make sounds to grow your plants!</p>
+    <button id="startButton">Start Garden</button>
+  </div>
 
+<script>
 // ============================================
 // CONFIG
 // ============================================
@@ -50,6 +118,7 @@ let mic;
 let plants = [];
 let terrain = [];
 let micLevel = 0;
+let isStarted = false;
 
 // ============================================
 // SETUP & DRAW
@@ -57,19 +126,47 @@ let micLevel = 0;
 function setup() {
   createCanvas(windowWidth, windowHeight);
   generateTerrain();
-  initializeMicrophone();
-  initializePlants();
+  
+  // Setup start button
+  const startButton = document.getElementById('startButton');
+  startButton.addEventListener('click', startGarden);
 }
 
 function draw() {
   drawSky();
-  micLevel = mic.getLevel();
+  
+  if (isStarted && mic) {
+    micLevel = mic.getLevel();
+  }
+  
   drawTerrain();
+  drawGrass();
 
+  // Update and draw plants
   for (let i = plants.length - 1; i >= 0; i--) {
     plants[i].update(micLevel);
     plants[i].display();
   }
+  
+  // Draw UI if started
+  if (isStarted) {
+    drawUI();
+  }
+}
+
+// ============================================
+// START FUNCTION
+// ============================================
+function startGarden() {
+  // Hide start screen
+  document.getElementById('startScreen').classList.add('hidden');
+  
+  // Start audio context
+  userStartAudio().then(() => {
+    initializeMicrophone();
+    initializePlants();
+    isStarted = true;
+  });
 }
 
 // ============================================
@@ -105,7 +202,7 @@ function generateTerrain() {
 }
 
 // ============================================
-// DRAW
+// DRAW FUNCTIONS
 // ============================================
 function drawSky() {
   for (let y = 0; y < height; y++) {
@@ -129,7 +226,57 @@ function drawTerrain() {
   endShape(CLOSE);
 }
 
+function drawGrass() {
+  stroke(...CONFIG.colors.grass);
+  strokeWeight(2);
+  
+  for (let i = 0; i < terrain.length; i += 3) {
+    const v = terrain[i];
+    const grassHeight = random(10, 25);
+    const sway = noise(i * 0.1, frameCount * 0.01) * 10 - 5;
+    line(v.x, v.y, v.x + sway, v.y - grassHeight);
+  }
+}
+
+function drawUI() {
+  // Volume indicator
+  fill(255, 255, 255, 200);
+  noStroke();
+  rect(10, 10, 200, 60, 10);
+  
+  fill(0);
+  textSize(14);
+  textAlign(LEFT);
+  text("Volume Level:", 20, 30);
+  
+  // Volume bar background
+  fill(100);
+  rect(20, 40, 160, 20, 5);
+  
+  // Volume bar fill
+  fill(76, 175, 80);
+  const barWidth = map(micLevel, 0, CONFIG.audio.maxLevel, 0, 160);
+  rect(20, 40, constrain(barWidth, 0, 160), 20, 5);
+  
+  // Instructions
+  fill(255, 255, 255, 200);
+  rect(10, 80, 200, 80, 10);
+  
+  fill(0);
+  textSize(12);
+  text("🎤 Make sound to grow plants", 20, 100);
+  text("🖱️ Click to add plants", 20, 120);
+  text(`Plants: ${plants.length}/${CONFIG.plants.max}`, 20, 140);
+  
+  // Title
+  textAlign(CENTER);
+  fill(255);
+  textSize(32);
+  text("🌱 Sonic Garden 🌱", width / 2, 40);
+}
+
 function getTerrainHeightAt(x) {
+  if (terrain.length === 0) return height - 100;
   const i = floor(map(x, 0, width, 0, terrain.length - 1));
   return terrain[constrain(i, 0, terrain.length - 1)].y;
 }
@@ -138,8 +285,8 @@ function getTerrainHeightAt(x) {
 // EVENTS
 // ============================================
 function mousePressed() {
-  userStartAudio(); // 🔥 required for mic
-
+  if (!isStarted) return;
+  
   if (plants.length < CONFIG.plants.max) {
     plants.push(new Plant(mouseX, getTerrainHeightAt(mouseX)));
   }
@@ -166,6 +313,8 @@ class Plant {
     this.gen = 0;
     this.maxGen = 5;
     this.lastGrow = 0;
+    this.noiseOffset = random(1000);
+    this.hue = random(80, 140);
   }
 
   update(mic) {
@@ -191,12 +340,28 @@ class Plant {
   display() {
     push();
     translate(this.pos.x, this.pos.y);
-    stroke(100, 200, 100);
+    
+    // Add sway
+    const sway = noise(this.noiseOffset, frameCount * 0.005) * 20 - 10;
+    rotate(radians(sway));
+    
+    colorMode(HSB);
+    stroke(this.hue, 80, 70);
+    strokeWeight(2);
 
     for (let c of this.sentence) {
       if (c === "F") {
         line(0, 0, 0, -this.len);
         translate(0, -this.len);
+        
+        // Random leaves
+        if (random(1) > 0.95) {
+          push();
+          fill(120, 180, 70, 150);
+          noStroke();
+          ellipse(0, 0, 8, 12);
+          pop();
+        }
       } else if (c === "+") {
         rotate(radians(this.angle));
       } else if (c === "-") {
@@ -207,7 +372,20 @@ class Plant {
         pop();
       }
     }
+    
+    // Draw flower if mature
+    if (this.gen >= 3) {
+      fill(this.hue, 100, 100, 200);
+      noStroke();
+      for (let i = 0; i < 6; i++) {
+        ellipse(4, 0, 8, 12);
+        rotate(radians(60));
+      }
+      fill(60, 100, 100);
+      ellipse(0, 0, 6, 6);
+    }
 
+    colorMode(RGB);
     pop();
   }
 }
