@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sonic Garden</title>
 
   <!-- p5.js -->
@@ -9,11 +10,104 @@
 
   <!-- p5 sound -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/addons/p5.sound.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    
+    #startScreen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      font-family: 'Arial', sans-serif;
+    }
+    
+    #startScreen h1 {
+      color: white;
+      font-size: 48px;
+      margin-bottom: 20px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    #startScreen p {
+      color: rgba(255,255,255,0.9);
+      font-size: 18px;
+      margin-bottom: 10px;
+      text-align: center;
+      max-width: 500px;
+    }
+    
+    #startButton {
+      padding: 20px 50px;
+      font-size: 24px;
+      background: white;
+      color: #667eea;
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      transition: transform 0.2s, box-shadow 0.2s;
+      margin-top: 20px;
+    }
+    
+    #startButton:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    }
+    
+    #startButton:active {
+      transform: translateY(0);
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+
+    #debugInfo {
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 100;
+    }
+  </style>
 </head>
 
 <body>
-<script>
+  <!-- Start Screen -->
+  <div id="startScreen">
+    <h1>🌱 Sonic Garden 🌱</h1>
+    <p>🎤 Allow microphone access when prompted</p>
+    <p>🔊 Make sounds (talk, clap, whistle) to grow plants</p>
+    <p>🖱️ Click to add new plants</p>
+    <button id="startButton">🎵 Start Garden</button>
+  </div>
 
+  <!-- Debug Info -->
+  <div id="debugInfo" class="hidden">
+    Mic: <span id="micStatus">Not Started</span><br>
+    Level: <span id="micLevelDebug">0.000</span><br>
+    Threshold: <span id="threshold">0.05</span><br>
+    Plants: <span id="plantCount">0</span>
+  </div>
+
+<script>
 // ============================================
 // CONFIG
 // ============================================
@@ -21,7 +115,9 @@ const CONFIG = {
   plants: {
     initial: 5,
     max: 12,
-    growInterval: 30
+    spawnThreshold: 0.10,
+    spawnInterval: 60,
+    growInterval: 20  // Reduced from 30 to 20 for faster growth
   },
   terrain: {
     detail: 100,
@@ -29,8 +125,15 @@ const CONFIG = {
     maxHeight: 50,
     noiseScale: 0.05
   },
+  colors: {
+    skyTop: [135, 206, 250],
+    skyBottom: [255, 182, 193],
+    ground: [101, 67, 33],
+    grass: [34, 139, 34]
+  },
   audio: {
-    growThreshold: 0.1
+    maxLevel: 0.5,
+    growThreshold: 0.05  // LOWERED from 0.1 to 0.05 for easier triggering
   }
 };
 
@@ -38,10 +141,11 @@ const CONFIG = {
 // GLOBALS
 // ============================================
 let mic;
-let micStarted = false;
 let plants = [];
 let terrain = [];
 let micLevel = 0;
+let isStarted = false;
+let micStarted = false;
 
 // ============================================
 // SETUP & DRAW
@@ -49,31 +153,110 @@ let micLevel = 0;
 function setup() {
   createCanvas(windowWidth, windowHeight);
   generateTerrain();
-  initializePlants();
+  
+  // Setup start button
+  const startButton = document.getElementById('startButton');
+  startButton.addEventListener('click', startGarden);
 }
 
 function draw() {
   drawSky();
-
-  micLevel = (mic && micStarted) ? mic.getLevel() : 0;
-
+  
+  if (isStarted && mic && micStarted) {
+    micLevel = mic.getLevel();
+    updateDebugInfo();
+  }
+  
   drawTerrain();
+  drawGrass();
 
+  // Update and draw plants
   for (let i = plants.length - 1; i >= 0; i--) {
     plants[i].update(micLevel);
     plants[i].display();
+  }
+  
+  // Auto spawn plants with sound
+  if (isStarted && micLevel > CONFIG.plants.spawnThreshold && 
+      plants.length < CONFIG.plants.max && 
+      frameCount % CONFIG.plants.spawnInterval === 0) {
+    const x = random(width * 0.2, width * 0.8);
+    const y = getTerrainHeightAt(x);
+    plants.push(new Plant(x, y));
+  }
+  
+  // Draw UI if started
+  if (isStarted) {
+    drawUI();
+  }
+}
+
+// ============================================
+// START FUNCTION
+// ============================================
+async function startGarden() {
+  console.log("Starting garden...");
+  
+  // Hide start screen
+  document.getElementById('startScreen').classList.add('hidden');
+  
+  // Show debug info
+  document.getElementById('debugInfo').classList.remove('hidden');
+  
+  try {
+    // Start audio context
+    await userStartAudio();
+    console.log("Audio context started");
+    
+    // Initialize microphone
+    await initializeMicrophone();
+    
+    // Initialize plants
+    initializePlants();
+    
+    isStarted = true;
+    console.log("Garden started successfully!");
+    
+  } catch (error) {
+    console.error("Error starting garden:", error);
+    alert("Could not access microphone. Please allow microphone access and refresh the page.");
   }
 }
 
 // ============================================
 // INIT
 // ============================================
+function initializeMicrophone() {
+  return new Promise((resolve, reject) => {
+    try {
+      mic = new p5.AudioIn();
+      
+      mic.start(() => {
+        console.log("Microphone started!");
+        micStarted = true;
+        document.getElementById('micStatus').textContent = 'Active ✓';
+        document.getElementById('micStatus').style.color = '#4CAF50';
+        resolve();
+      }, (err) => {
+        console.error("Microphone error:", err);
+        document.getElementById('micStatus').textContent = 'Error ✗';
+        document.getElementById('micStatus').style.color = '#f44336';
+        reject(err);
+      });
+      
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 function initializePlants() {
   for (let i = 0; i < CONFIG.plants.initial; i++) {
     const x = random(width * 0.2, width * 0.8);
     const y = getTerrainHeightAt(x);
     plants.push(new Plant(x, y));
   }
+  console.log(`Created ${CONFIG.plants.initial} initial plants`);
 }
 
 function generateTerrain() {
@@ -93,13 +276,14 @@ function generateTerrain() {
 }
 
 // ============================================
-// DRAW
+// DRAW FUNCTIONS
 // ============================================
 function drawSky() {
+  noStroke();
   for (let y = 0; y < height; y++) {
     const c = lerpColor(
-      color(135, 206, 250),
-      color(255, 182, 193),
+      color(...CONFIG.colors.skyTop),
+      color(...CONFIG.colors.skyBottom),
       y / height
     );
     stroke(c);
@@ -108,9 +292,8 @@ function drawSky() {
 }
 
 function drawTerrain() {
-  fill(101, 67, 33);
+  fill(...CONFIG.colors.ground);
   noStroke();
-
   beginShape();
   terrain.forEach(v => vertex(v.x, v.y));
   vertex(width, height);
@@ -118,7 +301,86 @@ function drawTerrain() {
   endShape(CLOSE);
 }
 
+function drawGrass() {
+  stroke(...CONFIG.colors.grass);
+  strokeWeight(2);
+  
+  for (let i = 0; i < terrain.length; i += 3) {
+    const v = terrain[i];
+    const grassHeight = random(10, 25);
+    const sway = noise(i * 0.1, frameCount * 0.01) * 10 - 5;
+    line(v.x, v.y, v.x + sway, v.y - grassHeight);
+  }
+}
+
+function drawUI() {
+  // Volume indicator
+  fill(255, 255, 255, 200);
+  noStroke();
+  rect(10, 10, 220, 70, 10);
+  
+  fill(0);
+  textSize(14);
+  textAlign(LEFT);
+  text("🎤 Volume Level:", 20, 30);
+  
+  // Volume bar background
+  fill(100);
+  rect(20, 45, 180, 25, 5);
+  
+  // Volume bar fill
+  const isActive = micLevel > CONFIG.audio.growThreshold;
+  fill(isActive ? color(76, 175, 80) : color(200, 200, 200));
+  const barWidth = map(micLevel, 0, CONFIG.audio.maxLevel, 0, 180);
+  rect(20, 45, constrain(barWidth, 0, 180), 25, 5);
+  
+  // Show threshold line
+  stroke(255, 0, 0);
+  strokeWeight(2);
+  const thresholdX = map(CONFIG.audio.growThreshold, 0, CONFIG.audio.maxLevel, 20, 200);
+  line(thresholdX, 45, thresholdX, 70);
+  
+  // Instructions
+  fill(255, 255, 255, 200);
+  noStroke();
+  rect(10, 90, 220, 100, 10);
+  
+  fill(0);
+  textSize(12);
+  text("🎤 Make sounds to grow!", 20, 110);
+  text("   (Talk, clap, whistle)", 20, 125);
+  text("🖱️ Click to add plants", 20, 145);
+  text(`🌱 Plants: ${plants.length}/${CONFIG.plants.max}`, 20, 165);
+  
+  // Status indicator
+  if (isActive) {
+    fill(76, 175, 80);
+    text("✓ Growing!", 20, 180);
+  }
+  
+  // Title
+  textAlign(CENTER);
+  fill(255);
+  textSize(32);
+  text("🌱 Sonic Garden 🌱", width / 2, 40);
+}
+
+function updateDebugInfo() {
+  document.getElementById('micLevelDebug').textContent = micLevel.toFixed(3);
+  document.getElementById('threshold').textContent = CONFIG.audio.growThreshold.toFixed(2);
+  document.getElementById('plantCount').textContent = plants.length;
+  
+  // Color code the level
+  const levelEl = document.getElementById('micLevelDebug');
+  if (micLevel > CONFIG.audio.growThreshold) {
+    levelEl.style.color = '#4CAF50';
+  } else {
+    levelEl.style.color = 'white';
+  }
+}
+
 function getTerrainHeightAt(x) {
+  if (terrain.length === 0) return height - 100;
   const i = floor(map(x, 0, width, 0, terrain.length - 1));
   return terrain[constrain(i, 0, terrain.length - 1)].y;
 }
@@ -127,19 +389,14 @@ function getTerrainHeightAt(x) {
 // EVENTS
 // ============================================
 function mousePressed() {
-  // 🔥 FIX: Start mic only after user click
-  if (!micStarted) {
-    userStartAudio();
-
-    mic = new p5.AudioIn();
-    mic.start();
-
-    micStarted = true;
-    console.log("Mic started");
-  }
-
+  if (!isStarted) return;
+  
   if (plants.length < CONFIG.plants.max) {
-    plants.push(new Plant(mouseX, getTerrainHeightAt(mouseX)));
+    const y = getTerrainHeightAt(mouseX);
+    plants.push(new Plant(mouseX, y));
+    console.log(`Plant added! Total: ${plants.length}`);
+  } else {
+    console.log("Max plants reached!");
   }
 }
 
@@ -159,22 +416,28 @@ class Plant {
       "X": "F+[[X]-X]-F[-FX]+X",
       "F": "FF"
     };
-    this.len = 3;
+    this.len = 4;  // Increased from 3 to make plants more visible
     this.angle = 25;
     this.gen = 0;
     this.maxGen = 5;
-    this.lastGrow = 0;
+    this.lastGrow = -100; // Start negative so first growth can happen immediately
+    this.noiseOffset = random(1000);
+    this.hue = random(80, 140);
+    
+    console.log(`Plant created at (${x.toFixed(0)}, ${y.toFixed(0)})`);
   }
 
-  update(micLevel) {
-    const canGrow =
-      micLevel > CONFIG.audio.growThreshold &&
+  update(mic) {
+    const timeSinceGrow = frameCount - this.lastGrow;
+    
+    if (
+      mic > CONFIG.audio.growThreshold &&
       this.gen < this.maxGen &&
-      frameCount - this.lastGrow > CONFIG.plants.growInterval;
-
-    if (canGrow) {
+      timeSinceGrow > CONFIG.plants.growInterval
+    ) {
       this.grow();
       this.lastGrow = frameCount;
+      console.log(`🌱 Plant grew! Generation: ${this.gen}/${this.maxGen}, Mic: ${mic.toFixed(3)}`);
     }
   }
 
@@ -190,12 +453,28 @@ class Plant {
   display() {
     push();
     translate(this.pos.x, this.pos.y);
-    stroke(100, 200, 100);
+    
+    // Add sway
+    const sway = noise(this.noiseOffset, frameCount * 0.005) * 20 - 10;
+    rotate(radians(sway));
+    
+    colorMode(HSB);
+    stroke(this.hue, 80, 70);
+    strokeWeight(2);
 
     for (let c of this.sentence) {
       if (c === "F") {
         line(0, 0, 0, -this.len);
         translate(0, -this.len);
+        
+        // Random leaves
+        if (random(1) > 0.95) {
+          push();
+          fill(120, 180, 70, 150);
+          noStroke();
+          ellipse(0, 0, 8, 12);
+          pop();
+        }
       } else if (c === "+") {
         rotate(radians(this.angle));
       } else if (c === "-") {
@@ -206,7 +485,20 @@ class Plant {
         pop();
       }
     }
+    
+    // Draw flower if mature
+    if (this.gen >= 3) {
+      fill(this.hue, 100, 100, 200);
+      noStroke();
+      for (let i = 0; i < 6; i++) {
+        ellipse(4, 0, 8, 12);
+        rotate(radians(60));
+      }
+      fill(60, 100, 100);
+      ellipse(0, 0, 6, 6);
+    }
 
+    colorMode(RGB);
     pop();
   }
 }
