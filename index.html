@@ -1,8 +1,21 @@
-// Sonic Garden - Algorithmic Art Final Project
-// Combines L-Systems, Perlin Noise, and Mic Interaction
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Sonic Garden</title>
+
+  <!-- p5.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+
+  <!-- p5 sound -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/addons/p5.sound.min.js"></script>
+</head>
+
+<body>
+<script>
 
 // ============================================
-// CONSTANTS & CONFIGURATION
+// CONFIG
 // ============================================
 const CONFIG = {
   plants: {
@@ -10,7 +23,7 @@ const CONFIG = {
     max: 12,
     spawnThreshold: 0.15,
     spawnInterval: 60,
-    growInterval: 30  // Frames between sound-based growth
+    growInterval: 30
   },
   terrain: {
     detail: 100,
@@ -31,7 +44,7 @@ const CONFIG = {
 };
 
 // ============================================
-// GLOBAL STATE
+// GLOBALS
 // ============================================
 let mic;
 let plants = [];
@@ -43,26 +56,24 @@ let micLevel = 0;
 // ============================================
 function setup() {
   createCanvas(windowWidth, windowHeight);
-  colorMode(RGB);
-  
-  generateTerrain(); // Generate terrain FIRST
+  generateTerrain();
   initializeMicrophone();
   initializePlants();
-  
-  textAlign(CENTER);
 }
 
 function draw() {
   drawSky();
-  updateMicLevel();
+  micLevel = mic.getLevel();
   drawTerrain();
-  updateAndDrawPlants();
-  handleAutoSpawn();
-  drawUI();
+
+  for (let i = plants.length - 1; i >= 0; i--) {
+    plants[i].update(micLevel);
+    plants[i].display();
+  }
 }
 
 // ============================================
-// INITIALIZATION
+// INIT
 // ============================================
 function initializeMicrophone() {
   mic = new p5.AudioIn();
@@ -70,42 +81,38 @@ function initializeMicrophone() {
 }
 
 function initializePlants() {
-  const { initial } = CONFIG.plants;
-  const margin = width * 0.2;
-  
-  for (let i = 0; i < initial; i++) {
-    const x = random(margin, width - margin);
+  for (let i = 0; i < CONFIG.plants.initial; i++) {
+    const x = random(width * 0.2, width * 0.8);
     const y = getTerrainHeightAt(x);
-    addPlant(x, y);
+    plants.push(new Plant(x, y));
   }
 }
 
 function generateTerrain() {
   terrain = [];
-  const { detail, minHeight, maxHeight, noiseScale } = CONFIG.terrain;
-  const noiseOffset = random(1000);
-  
-  for (let i = 0; i <= detail; i++) {
-    const x = map(i, 0, detail, 0, width);
-    const noiseVal = noise(i * noiseScale + noiseOffset);
-    const y = map(noiseVal, 0, 1, height - minHeight, height - maxHeight);
+  const offset = random(1000);
+
+  for (let i = 0; i <= CONFIG.terrain.detail; i++) {
+    const x = map(i, 0, CONFIG.terrain.detail, 0, width);
+    const y = map(
+      noise(i * CONFIG.terrain.noiseScale + offset),
+      0, 1,
+      height - CONFIG.terrain.minHeight,
+      height - CONFIG.terrain.maxHeight
+    );
     terrain.push(createVector(x, y));
   }
 }
 
 // ============================================
-// DRAWING FUNCTIONS
+// DRAW
 // ============================================
 function drawSky() {
-  const [r1, g1, b1] = CONFIG.colors.skyTop;
-  const [r2, g2, b2] = CONFIG.colors.skyBottom;
-  
   for (let y = 0; y < height; y++) {
-    const inter = y / height;
     const c = lerpColor(
-      color(r1, g1, b1),
-      color(r2, g2, b2),
-      inter
+      color(...CONFIG.colors.skyTop),
+      color(...CONFIG.colors.skyBottom),
+      y / height
     );
     stroke(c);
     line(0, y, width, y);
@@ -113,15 +120,8 @@ function drawSky() {
 }
 
 function drawTerrain() {
-  drawGround();
-  drawGrass();
-}
-
-function drawGround() {
-  const [r, g, b] = CONFIG.colors.ground;
-  fill(r, g, b);
+  fill(...CONFIG.colors.ground);
   noStroke();
-  
   beginShape();
   terrain.forEach(v => vertex(v.x, v.y));
   vertex(width, height);
@@ -129,127 +129,19 @@ function drawGround() {
   endShape(CLOSE);
 }
 
-function drawGrass() {
-  const [r, g, b] = CONFIG.colors.grass;
-  stroke(r, g, b);
-  strokeWeight(2);
-  
-  for (let i = 0; i < terrain.length; i += 3) {
-    const v = terrain[i];
-    const grassHeight = random(10, 25);
-    const sway = noise(i * 0.1, frameCount * 0.01) * 10 - 5;
-    line(v.x, v.y, v.x + sway, v.y - grassHeight);
-  }
-}
-
-function drawUI() {
-  drawVolumeIndicator();
-  drawInstructions();
-  drawTitle();
-}
-
-function drawVolumeIndicator() {
-  const x = 10, y = 10, w = 200, h = 60;
-  
-  // Background
-  fill(255, 255, 255, 200);
-  noStroke();
-  rect(x, y, w, h, 10);
-  
-  // Label
-  fill(0);
-  textSize(14);
-  textAlign(LEFT);
-  text("Volume Level:", x + 10, y + 20);
-  
-  // Progress bar background
-  fill(100);
-  rect(x + 10, y + 30, w - 20, 20, 5);
-  
-  // Progress bar fill
-  fill(76, 175, 80);
-  const barWidth = map(micLevel, 0, CONFIG.audio.maxLevel, 0, w - 20);
-  rect(x + 10, y + 30, constrain(barWidth, 0, w - 20), 20, 5);
-}
-
-function drawInstructions() {
-  const x = 10, y = 80, w = 200, h = 80;
-  
-  fill(255, 255, 255, 200);
-  noStroke();
-  rect(x, y, w, h, 10);
-  
-  fill(0);
-  textSize(12);
-  textAlign(LEFT);
-  text("🎤 Make sound to grow plants", x + 10, y + 20);
-  text("🖱️ Click to add plants", x + 10, y + 40);
-  text(`Plants: ${plants.length}/${CONFIG.plants.max}`, x + 10, y + 60);
-}
-
-function drawTitle() {
-  textAlign(CENTER);
-  fill(255);
-  textSize(32);
-  text("🌱 Sonic Garden 🌱", width / 2, 40);
-}
-
-// ============================================
-// UPDATE FUNCTIONS
-// ============================================
-function updateMicLevel() {
-  micLevel = mic.getLevel();
-}
-
-function updateAndDrawPlants() {
-  for (let i = plants.length - 1; i >= 0; i--) {
-    plants[i].update(micLevel);
-    plants[i].display();
-    
-    if (plants[i].isDead()) {
-      plants.splice(i, 1);
-    }
-  }
-}
-
-function handleAutoSpawn() {
-  const { max, spawnThreshold, spawnInterval } = CONFIG.plants;
-  const shouldSpawn = micLevel > spawnThreshold 
-    && plants.length < max 
-    && frameCount % spawnInterval === 0;
-  
-  if (shouldSpawn) {
-    const x = random(width * 0.2, width * 0.8);
-    const y = getTerrainHeightAt(x);
-    addPlant(x, y);
-  }
-}
-
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
-function addPlant(x, y) {
-  plants.push(new Plant(x, y));
-}
-
 function getTerrainHeightAt(x) {
-  if (terrain.length === 0) return height - 100;
-  
-  const index = floor(map(x, 0, width, 0, terrain.length - 1));
-  const safeIndex = constrain(index, 0, terrain.length - 1);
-  return terrain[safeIndex].y;
+  const i = floor(map(x, 0, width, 0, terrain.length - 1));
+  return terrain[constrain(i, 0, terrain.length - 1)].y;
 }
 
 // ============================================
-// EVENT HANDLERS
+// EVENTS
 // ============================================
 function mousePressed() {
+  userStartAudio(); // 🔥 required for mic
+
   if (plants.length < CONFIG.plants.max) {
-    const plantY = getTerrainHeightAt(mouseX);
-    addPlant(mouseX, plantY);
-    console.log(`Plant added at (${mouseX}, ${plantY}). Total: ${plants.length}`);
-  } else {
-    console.log(`Maximum plants reached (${CONFIG.plants.max})`);
+    plants.push(new Plant(mouseX, getTerrainHeightAt(mouseX)));
   }
 }
 
@@ -263,160 +155,63 @@ function windowResized() {
 // ============================================
 class Plant {
   constructor(x, y) {
-    this.position = createVector(x, y);
-    this.age = 0;
-    this.maxAge = random(500, 800);
-    this.generation = 0;
-    this.maxGeneration = 5;
-    
-    // L-System
-    this.lSystem = {
-      axiom: "X",
-      sentence: "X",
-      rules: {
-        "X": "F+[[X]-X]-F[-FX]+X",
-        "F": "FF"
-      },
-      length: 3,
-      angle: 25
+    this.pos = createVector(x, y);
+    this.sentence = "X";
+    this.rules = {
+      "X": "F+[[X]-X]-F[-FX]+X",
+      "F": "FF"
     };
-    
-    this.noiseOffset = random(1000);
-    this.baseHue = random(80, 140);
-    this.currentHue = this.baseHue;
-    
-    // NEW: Track last growth time for sound-based growth
-    this.lastSoundGrowth = 0;
+    this.len = 3;
+    this.angle = 25;
+    this.gen = 0;
+    this.maxGen = 5;
+    this.lastGrow = 0;
   }
-  
-  update(micLevel) {
-    this.age++;
-    this.updateGrowth(micLevel);
-    this.updateColor(micLevel);
-  }
-  
-  updateGrowth(micLevel) {
-    // Sound-based growth - FIXED: Now checks time since last growth
-    const timeSinceLastGrowth = frameCount - this.lastSoundGrowth;
-    const soundGrowth = micLevel > CONFIG.audio.growThreshold 
-      && this.generation < this.maxGeneration 
-      && timeSinceLastGrowth >= CONFIG.plants.growInterval;
-    
-    // Automatic slow growth
-    const autoGrowth = this.generation < this.maxGeneration 
-      && this.age % 120 === 0;
-    
-    if (soundGrowth) {
+
+  update(mic) {
+    if (
+      mic > CONFIG.audio.growThreshold &&
+      this.gen < this.maxGen &&
+      frameCount - this.lastGrow > CONFIG.plants.growInterval
+    ) {
       this.grow();
-      this.lastSoundGrowth = frameCount; // Update last growth time
-      console.log(`Plant grew from sound! Generation: ${this.generation}`);
-    } else if (autoGrowth) {
-      this.grow();
-      console.log(`Plant auto-grew! Generation: ${this.generation}`);
+      this.lastGrow = frameCount;
     }
   }
-  
-  updateColor(micLevel) {
-    const micInfluence = map(micLevel, 0, CONFIG.audio.maxLevel, 0, 50);
-    this.currentHue = (this.baseHue + micInfluence) % 360;
-  }
-  
+
   grow() {
-    let nextSentence = "";
-    
-    for (let char of this.lSystem.sentence) {
-      nextSentence += this.lSystem.rules[char] || char;
+    let next = "";
+    for (let c of this.sentence) {
+      next += this.rules[c] || c;
     }
-    
-    this.lSystem.sentence = nextSentence;
-    this.generation++;
+    this.sentence = next;
+    this.gen++;
   }
-  
+
   display() {
     push();
-    translate(this.position.x, this.position.y);
-    
-    // Apply sway
-    const sway = noise(this.noiseOffset, frameCount * 0.005) * 20 - 10;
-    rotate(radians(sway));
-    
-    this.drawBranches();
-    
-    pop();
-  }
-  
-  drawBranches() {
-    colorMode(HSB);
-    stroke(this.currentHue, 80, 70);
-    strokeWeight(2);
-    
-    for (let char of this.lSystem.sentence) {
-      switch(char) {
-        case 'F':
-          this.drawSegment();
-          break;
-        case '+':
-          rotate(radians(this.lSystem.angle));
-          break;
-        case '-':
-          rotate(radians(-this.lSystem.angle));
-          break;
-        case '[':
-          push();
-          break;
-        case ']':
-          pop();
-          break;
+    translate(this.pos.x, this.pos.y);
+    stroke(100, 200, 100);
+
+    for (let c of this.sentence) {
+      if (c === "F") {
+        line(0, 0, 0, -this.len);
+        translate(0, -this.len);
+      } else if (c === "+") {
+        rotate(radians(this.angle));
+      } else if (c === "-") {
+        rotate(radians(-this.angle));
+      } else if (c === "[") {
+        push();
+      } else if (c === "]") {
+        pop();
       }
     }
-    
-    if (this.generation >= 3) {
-      this.drawFlower();
-    }
-    
-    colorMode(RGB);
-  }
-  
-  drawSegment() {
-    const variation = noise(frameCount * 0.01 + this.noiseOffset) * 2 - 1;
-    const length = this.lSystem.length + variation;
-    
-    line(0, 0, 0, -length);
-    translate(0, -length);
-    
-    if (random(1) > 0.95) {
-      this.drawLeaf();
-    }
-  }
-  
-  drawLeaf() {
-    push();
-    fill(120, 180, 70, 150);
-    noStroke();
-    ellipse(0, 0, 8, 12);
+
     pop();
-  }
-  
-  drawFlower() {
-    push();
-    colorMode(HSB);
-    fill(this.currentHue, 100, 100, 200);
-    noStroke();
-    
-    // Petals
-    for (let i = 0; i < 6; i++) {
-      ellipse(4, 0, 8, 12);
-      rotate(radians(60));
-    }
-    
-    // Center
-    fill(60, 100, 100);
-    ellipse(0, 0, 6, 6);
-    
-    pop();
-  }
-  
-  isDead() {
-    return this.age > this.maxAge;
   }
 }
+
+</script>
+</body>
+</html>
